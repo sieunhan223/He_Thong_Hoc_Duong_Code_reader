@@ -10,7 +10,6 @@
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
 
-
 #define RST_PIN 3 
 #define SS_PIN 4 
 #define ken 8
