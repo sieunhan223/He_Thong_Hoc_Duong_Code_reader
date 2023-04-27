@@ -1,19 +1,20 @@
 #include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
-#include <ESP8266WiFi.h>
-#include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
+#include <Adafruit_GFX.h>
+#include <WiFi.h>
+#include <WiFiAP.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
-#include <ESPAsyncTCP.h>
-#include <WiFiClientSecureBearSSL.h>
-#include "LittleFS.h";
+#include <SPIFFS.h>
 
-#define RST_PIN D3 // Configurable, see typical pin layout above
-#define SS_PIN D4  // Configurable, see typical pin layout above
-#define ken D8
-MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance
+
+#define RST_PIN 3 
+#define SS_PIN 4 
+#define ken 8
+MFRC522 mfrc522(SS_PIN, RST_PIN); 
 MFRC522::MIFARE_Key key;
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 
@@ -38,44 +39,29 @@ const char *URL_serverPath = "/URL_server.txt";
 const char *AP_namePath = "/AP_name.txt";
 const char *AP_passPath = "/AP_pass.txt";
 
-// http://192.168.4.1/
-
-// Root certificate for howsmyssl.com
-const char IRG_Root_X1 [] PROGMEM = R"CERT(
------BEGIN CERTIFICATE-----
-MIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQGEwJJ
-RTESMBAGA1UEChMJQmFsdGltb3JlMRMwEQYDVQQLEwpDeWJlclRydXN0MSIwIAYD
-VQQDExlCYWx0aW1vcmUgQ3liZXJUcnVzdCBSb290MB4XDTAwMDUxMjE4NDYwMFoX
-DTI1MDUxMjIzNTkwMFowWjELMAkGA1UEBhMCSUUxEjAQBgNVBAoTCUJhbHRpbW9y
-ZTETMBEGA1UECxMKQ3liZXJUcnVzdDEiMCAGA1UEAxMZQmFsdGltb3JlIEN5YmVy
-VHJ1c3QgUm9vdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKMEuyKr
-mD1X6CZymrV51Cni4eiVgLGw41uOKymaZN+hXe2wCQVt2yguzmKiYv60iNoS6zjr
-IZ3AQSsBUnuId9Mcj8e6uYi1agnnc+gRQKfRzMpijS3ljwumUNKoUMMo6vWrJYeK
-mpYcqWe4PwzV9/lSEy/CG9VwcPCPwBLKBsua4dnKM3p31vjsufFoREJIE9LAwqSu
-XmD+tqYF/LTdB1kC1FkYmGP1pWPgkAx9XbIGevOF6uvUA65ehD5f/xXtabz5OTZy
-dc93Uk3zyZAsuT3lySNTPx8kmCFcB5kpvcY67Oduhjprl3RjM71oGDHweI12v/ye
-jl0qhqdNkNwnGjkCAwEAAaNFMEMwHQYDVR0OBBYEFOWdWTCCR1jMrPoIVDaGezq1
-BE3wMBIGA1UdEwEB/wQIMAYBAf8CAQMwDgYDVR0PAQH/BAQDAgEGMA0GCSqGSIb3
-DQEBBQUAA4IBAQCFDF2O5G9RaEIFoN27TyclhAO992T9Ldcw46QQF+vaKSm2eT92
-9hkTI7gQCvlYpNRhcL0EYWoSihfVCr3FvDB81ukMJY2GQE/szKN+OMY3EU/t3Wgx
-jkzSswF07r51XgdIGn9w/xZchMB5hbgF/X++ZRGjD8ACtPhSNzkE1akxehi/oCr0
-Epn3o0WC4zxe9Z2etciefC7IpJ5OCBRLbf1wbWsaY71k5h+3zvDyny67G7fyUIhz
-ksLi4xaNmjICq44Y3ekQEe5+NauQrz4wlHrQMz2nZQ/1/I6eYs9HRCwBXbsdtTLS
-R9I4LtD+gdwyah617jzV/OeBHRnDJELqYzmp
------END CERTIFICATE-----
-)CERT";
-
-// Create a list of certificates with the server certificate
-X509List cert(IRG_Root_X1);
-
-// Fingerprint (might need to be updated)
-const uint8_t fingerprint[20] = {0x1a, 0x1b, 0xd6, 0x42, 0xec, 0x90, 0x99, 0x84, 0xf5, 0x3c, 0x1f, 0xee, 0x43, 0xd1, 0x36, 0x0f, 0xef, 0xb7, 0x3d, 0xb9};
+// http://192.168.4.1/ : AP IP Address
 
 AsyncWebServer server(80);
+WiFiClient client;
+HTTPClient http;
 
 IPAddress localIP;
 
 //*****************************************************************************************//
+
+void splitName(String name, String lst_name[]){
+  int sotu = 0;
+  int index_dau = 0,index_cuoi = 0;
+  for(int i = 0; i < name.length(); i++){
+    if (name[i] == ' '){
+      index_cuoi = name.indexOf(' ',index_cuoi+1);
+      lst_name[sotu] = name.substring(index_dau,index_cuoi);
+      index_dau = index_cuoi+1;
+      sotu++;
+    }
+  }
+  lst_name[sotu] = name.substring(name.lastIndexOf(' ')+1,name.length());
+}
 
 // hàm đọc:
 void readBlock(byte block, byte len, byte *content, MFRC522::StatusCode &status)
@@ -97,7 +83,7 @@ void readBlock(byte block, byte len, byte *content, MFRC522::StatusCode &status)
     }
 }
 
-// Read File from LittleFS
+// Read File from SPIFFS
 String readFile(fs::FS &fs, const char *path)
 {
     Serial.printf("Reading file: %s\r\n", path);
@@ -118,7 +104,7 @@ String readFile(fs::FS &fs, const char *path)
     file.close();
     return fileContent;
 }
-// Write file to LittleFS
+// Write file to SPIFFS
 void writeFile(fs::FS &fs, const char *path, const char *message)
 {
     Serial.printf("Writing file: %s\r\n", path);
@@ -140,17 +126,13 @@ void writeFile(fs::FS &fs, const char *path, const char *message)
     file.close();
 }
 
-// Initialize LittleFS
-void initFS()
+// Initialize SPIFFS
+void initSPIFFS()
 {
-    if (!LittleFS.begin())
-    {
-        Serial.println("An error has occurred while mounting LittleFS");
-    }
-    else
-    {
-        Serial.println("LittleFS mounted successfully");
-    }
+  if (!SPIFFS.begin())
+    Serial.println("An error has occurred while mounting SPIFFS");
+  else
+    Serial.println("SPIFFS mounted successfully");
 }
 
 // Initialize WiFi
@@ -163,17 +145,10 @@ bool initWiFi()
     }
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid.c_str(), pass.c_str());
-
     Serial.println("Connecting to WiFi...");
-    int dem = 0;
     while (WiFi.status() != WL_CONNECTED)
     {
-        if (dem > 10)
-        {
-            break;
-        }
         Serial.print(".");
-        dem = dem + 1;
         for (int i = 0; i < 3; i++)
         {
             digitalWrite(ken, HIGH);
@@ -195,8 +170,8 @@ bool initWiFi()
 void setup()
 {
     Serial.begin(112500); // Initialize serial communications with the PC
-    initFS();             // InitFS
-    SPI.begin();          // Init SPI bus
+    initSPIFFS();       // Init initSPIFFS
+    SPI.begin();      // Init SPI bus
     mfrc522.PCD_Init();   // Init MFRC522 card
 
     pinMode(ken, OUTPUT); // Init ken
@@ -205,12 +180,12 @@ void setup()
     lcd.setCursor(5, 2);
     lcd.print("LOADING...");
     // đọc và lưa giá trị ở tệp
-    ssid = readFile(LittleFS, ssidPath);
-    pass = readFile(LittleFS, passPath);
-    terminal_id = readFile(LittleFS, terminal_idPath);
-    URL_server = readFile(LittleFS, URL_serverPath);
-    AP_name = readFile(LittleFS, AP_namePath);
-    AP_pass = readFile(LittleFS, AP_passPath);
+    ssid = readFile(SPIFFS, ssidPath);
+    pass = readFile(SPIFFS, passPath);
+    terminal_id = readFile(SPIFFS, terminal_idPath);
+    URL_server = readFile(SPIFFS, URL_serverPath);
+    AP_name = readFile(SPIFFS, AP_namePath);
+    AP_pass = readFile(SPIFFS, AP_passPath);
 
     Serial.println(ssid);
     Serial.println(pass);
@@ -219,22 +194,22 @@ void setup()
     Serial.println(AP_name);
     Serial.println(AP_pass);
 
-    initWiFi();
-
-    // Kết nối web esp
-    // Connect to Wi-Fi network with SSID and password
+    // Kích hoạt chế độ AP
     Serial.println("Setting AP (Access Point)");
     Serial.print("Configuring access point...");
-    WiFi.softAP(AP_name, AP_pass);
+    WiFi.softAP(AP_name.c_str(), AP_pass.c_str());
     IPAddress IP = WiFi.softAPIP();
     Serial.print("AP IP address: ");
     Serial.println(IP);
 
+    //Kết nối WiFi
+    initWiFi();
+
     // Web Server Root URL
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(LittleFS, "/device_config.html", "text/html"); });
+              { request->send(SPIFFS, "/device_config.html", "text/html"); });
 
-    server.serveStatic("/", LittleFS, "/");
+    server.serveStatic("/", SPIFFS, "/");
 
     server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
               {
@@ -248,7 +223,7 @@ void setup()
             Serial.print("SSID set to: ");
             Serial.println(ssid);
             // Write file to save value
-            writeFile(LittleFS, ssidPath, ssid.c_str());
+            writeFile(SPIFFS, ssidPath, ssid.c_str());
           }
           // HTTP POST pass value
           if (p->name() == PARAM_INPUT_2) {
@@ -256,7 +231,7 @@ void setup()
             Serial.print("Password set to: ");
             Serial.println(pass);
             // Write file to save value
-            writeFile(LittleFS, passPath, pass.c_str());
+            writeFile(SPIFFS, passPath, pass.c_str());
           }
           // HTTP POST terminal_id value
           if (p->name() == PARAM_INPUT_3) {
@@ -264,7 +239,7 @@ void setup()
             Serial.print("Terminal ID set to: ");
             Serial.println(terminal_id);
             // Write file to save value
-            writeFile(LittleFS, terminal_idPath, terminal_id.c_str());
+            writeFile(SPIFFS, terminal_idPath, terminal_id.c_str());
           }
           // HTTP POST server value
           if (p->name() == PARAM_INPUT_4) {
@@ -272,7 +247,7 @@ void setup()
             Serial.print("server address set to: ");
             Serial.println(URL_server);
             // Write file to save value
-            writeFile(LittleFS, URL_serverPath, URL_server.c_str());
+            writeFile(SPIFFS, URL_serverPath, URL_server.c_str());
           }
           // HTTP POST AP name value
           if (p->name() == PARAM_INPUT_5) {
@@ -280,7 +255,7 @@ void setup()
             Serial.print("AP name set to: ");
             Serial.println(AP_name);
             // Write file to save value
-            writeFile(LittleFS, AP_namePath, AP_name.c_str());
+            writeFile(SPIFFS, AP_namePath, AP_name.c_str());
           }
           // HTTP POST AP pass value
           if (p->name() == PARAM_INPUT_6) {
@@ -288,7 +263,7 @@ void setup()
             Serial.print("AP pass set to: ");
             Serial.println(AP_pass);
             // Write file to save value
-            writeFile(LittleFS, AP_passPath, AP_pass.c_str());
+            writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
           }
           //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
         }
@@ -322,6 +297,12 @@ void loop()
 
     for (byte i = 0; i < 6; i++)
         key.keyByte[i] = 0xFF;
+    // key.keyByte[0] = 0x01;
+    // key.keyByte[1] = 0x02;
+    // key.keyByte[2] = 0x03;
+    // key.keyByte[3] = 0x04;
+    // key.keyByte[4] = 0x05;
+    // key.keyByte[5] = 0x06;
 
     // some variables we need
     byte block;
@@ -432,22 +413,38 @@ void loop()
     mfrc522.PCD_StopCrypto1();
 
     //-------------------------------------------------------------------------------------------------*
-    // đọc thẻ:
+    // In lên màn hình:
     lcd.clear();
-    // In Name lên LCD
-    String s_Name = s_Name1 + s_Name2;
-    lcd.print(s_Name);
-    Serial.println("");
-    // In lớp lên LCD
-    lcd.setCursor(0, 1);
-    lcd.print("LOP: ");
-    lcd.print("1A");
 
-    // in trạng thái lên LCD
-    lcd.setCursor(0, 2);
+    //Xử lý biến name
+    String s_Name = s_Name1 + s_Name2;
+    int len_name = s_Name.length();
+    for (int i = len_name-1; i >= 0; i--){
+        // Serial.print(i);
+        // Serial.print("\t");
+        // Serial.println(a[i]);
+        if(s_Name[i] != ' '){
+        s_Name = s_Name.substring(0,i+1);
+        len_name = s_Name.length();
+        // Serial.println(s_Name);
+        // Serial.println(len_name);
+        break;
+        }
+    }
+
+
+    // in SSCID lên LCD
+    lcd.setCursor(0, 1);
     lcd.print("ID: ");
     lcd.print(s_SSCID);
 
+    //in mã thiết bị lên LCD
+    lcd.rightToLeft();
+    lcd.setCursor(0, 3);
+    lcd.print(TerminalID);
+    lcd.leftToRight();
+
+    // Nếu bị lỗi:
     if (!xacthuc)
     {
         lcd.clear();
@@ -455,7 +452,6 @@ void loop()
         lcd.print("LOI");
         lcd.setCursor(1, 2);
         lcd.print("VUI LONG THU LAI!");
-        xacthuc = true;
     }
 
     // kèn
@@ -474,11 +470,8 @@ void loop()
         doc["SSCID"] = s_SSCID;
         doc["Name"] = s_Name;
         serializeJsonPretty(doc, jsonData);
-        WiFiClient client;
-        HTTPClient http;
 
         // std::unique_ptr<BearSSL::WiFiClientSecure>clients(new BearSSL::WiFiClientSecure);
-
         // clients->setFingerprint(fingerprint);
 
         Serial.print("[HTTP] begin...\n");
@@ -512,16 +505,51 @@ void loop()
                 String data = obj["Data"];   // lấy dữ liệu tên Data
                 deserializeJson(doc2, data); // Vì Data là 1 JSON cho nên phải fix data thêm 1 lần nữa
                 JsonObject obj2 = doc2.as<JsonObject>();
-                const char *RealTime = obj2["Time"]; // lấy real time
-                // in RealTime lên LCD
-                lcd.setCursor(0, 3);
-                for (int i = 0; i < 19; i++)
-                {
-                    if (RealTime[i] == 'T')
-                        lcd.print(" ");
+                const char *data_Time = obj2["Time"]; // lấy real time
+                const char* data_Name = obj2["Name"];// lấy Name
+
+                //Xư lý Real Time
+                String RealTime = String(data_Time); 
+                String RealTime1 = RealTime.substring(0,10);
+                String RealTime1_list[] = {RealTime1.substring(8,10),RealTime1.substring(5,7),RealTime1.substring(0,4)};
+                RealTime1 = RealTime1_list[0] + "/" + RealTime1_list[1] + "/" + RealTime1_list[2];
+                String RealTime2 = RealTime.substring(11,16);
+
+                //Name
+                String Name_API = String(data_Name);
+                //Serial.println(Name_API);
+                int len_name = Name_API.length();
+                //In Name len LCD
+                lcd.setCursor(0, 0);
+                String lst[10] = {"","","","","","","","","","",};
+                splitName(Name_API,lst);
+                if(len_name > 21){
+                    for (int i = 1; i < lst->length(); i ++){
+                    if(lst[i+1] != ""){
+                        lst[i] = lst[i].substring(0,1);
+                    }
                     else
-                        lcd.print(RealTime[i]);
+                        break;
+                    }
                 }
+                for (int i = 0; i < lst->length(); i ++){
+                    if ((lst[i].length() == 1) && (lst[i+1].length() == 1)){
+                        Serial.print(lst[i]);
+                        lcd.print(lst[i]);
+                    }
+                    else{
+                        Serial.print(lst[i]+" ");
+                        lcd.print(lst[i]);
+                        lcd.print(" ");
+                    }
+
+                }
+                
+                // in RealTime lên LCD
+                lcd.setCursor(0, 2);
+                lcd.print(RealTime1);
+                lcd.print(" ");
+                lcd.print(RealTime2);
             }
             else
                 Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
