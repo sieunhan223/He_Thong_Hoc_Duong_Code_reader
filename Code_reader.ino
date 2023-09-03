@@ -1,36 +1,60 @@
-#include <LiquidCrystal_I2C.h>
-#include <SPI.h>
-#include <MFRC522.h>
+#include <LiquidCrystal.h>
 #include <WiFiClient.h>
-#include <Adafruit_GFX.h>
 #include <WiFi.h>
 #include <WiFiAP.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
+#include <PCF8574.h>
+#include <PN532_HSU.h>
+#include <PN532.h>
+#include <ESP32Time.h>
 
-#define RST_PIN 3 
-#define SS_PIN 4 
-#define ken 8
-MFRC522 mfrc522(SS_PIN, RST_PIN); 
-MFRC522::MIFARE_Key key;
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+#define LCD_8BITMODE 0x10
+#define LCD_SCREEN 0
+#define SOUND 1
+#define LED_2 2
+#define LED_3 3
+#define LED_4 4
+#define LED_5 5
 
-// Search for parameter in HTTP POST request
+// Init for ESP32 Timer
+ESP32Time rtc(3600); // offset in seconds GMT+1
+const char *API_Time = "http://worldtimeapi.org/api/timezone/Asia/Ho_Chi_Minh";
+String timer;
+
+// init lcd
+PCF8574 pcf(0x27);
+LiquidCrystal lcd(32, 33, 25, 26, 27, 14, 13, 15, 2, 4);
+// pn532
+PN532_HSU pn532hsu(Serial2);
+PN532 nfc(pn532hsu);
+uint8_t key[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+uint8_t checkCard;
+// khai báo các biến
+uint8_t CardUID[] = {0, 0, 0, 0, 0, 0, 0};
+uint8_t uidLength; // Length of the UID (4 or 7 bytes depending on ISO14443A card type)
+String TerminalID = "";
+String SSCID = "";
+String Name_st = "", Name_display = "";
+String s_CardUID = "";
+// Tham số để tìm kiếm từ HTML form
 const char *PARAM_INPUT_1 = "ssid";
 const char *PARAM_INPUT_2 = "pass";
 const char *PARAM_INPUT_3 = "terminal_id";
 const char *PARAM_INPUT_4 = "URL_server";
 const char *PARAM_INPUT_5 = "AP_name";
 const char *PARAM_INPUT_6 = "AP_pass";
-// Variables to save values from HTML form
+// Biến lưu các giá trị từ HTML form
 String ssid, pass;
 String terminal_id;
 String URL_server;
 String AP_name, AP_pass;
-boolean restart = false, xacthuc = true;
-// File paths to save input values permanently
+// Các biến kiểm tra
+boolean restart = false, valid = true;
+String checkSSCID = "";
+// Các đường dẫn chứa giá trị
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
 const char *terminal_idPath = "/terminal_id.txt";
@@ -45,87 +69,9 @@ WiFiClient client;
 HTTPClient http;
 
 IPAddress localIP;
-
 //*****************************************************************************************//
 
-void splitName(String name, String lst_name[]){
-  int sotu = 0;
-  int index_dau = 0,index_cuoi = 0;
-  for(int i = 0; i < name.length(); i++){
-    if (name[i] == ' '){
-      index_cuoi = name.indexOf(' ',index_cuoi+1);
-      lst_name[sotu] = name.substring(index_dau,index_cuoi);
-      index_dau = index_cuoi+1;
-      sotu++;
-    }
-  }
-  lst_name[sotu] = name.substring(name.lastIndexOf(' ')+1,name.length());
-}
-
-// hàm đọc:
-void readBlock(byte block, byte len, byte *content, MFRC522::StatusCode &status)
-{
-    status = mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, block, &key, &(mfrc522.uid)); // line 834
-    if (status != MFRC522::STATUS_OK)
-    {
-        Serial.print(F("Authentication failed: "));
-        Serial.println(mfrc522.GetStatusCodeName(status));
-        xacthuc = false;
-    }
-
-    status = mfrc522.MIFARE_Read(block, content, &len);
-    if (status != MFRC522::STATUS_OK)
-    {
-        Serial.print(F("Reading failed: "));
-        Serial.println(mfrc522.GetStatusCodeName(status));
-        xacthuc = false;
-    }
-}
-
-// Read File from SPIFFS
-String readFile(fs::FS &fs, const char *path)
-{
-    Serial.printf("Reading file: %s\r\n", path);
-
-    File file = fs.open(path, "r");
-    if (!file || file.isDirectory())
-    {
-        Serial.println("- failed to open file for reading");
-        return String();
-    }
-
-    String fileContent;
-    while (file.available())
-    {
-        fileContent = file.readStringUntil('\n');
-        break;
-    }
-    file.close();
-    return fileContent;
-}
-// Write file to SPIFFS
-void writeFile(fs::FS &fs, const char *path, const char *message)
-{
-    Serial.printf("Writing file: %s\r\n", path);
-
-    File file = fs.open(path, "w");
-    if (!file)
-    {
-        Serial.println("- failed to open file for writing");
-        return;
-    }
-    if (file.print(message))
-    {
-        Serial.println("- file written");
-    }
-    else
-    {
-        Serial.println("- frite failed");
-    }
-    file.close();
-}
-
-// Initialize SPIFFS
+// Khởi tạo SPIFS
 void initSPIFFS()
 {
   if (!SPIFFS.begin())
@@ -133,29 +79,375 @@ void initSPIFFS()
   else
     Serial.println("SPIFFS mounted successfully");
 }
+// Hàm đọc file
+String readFile(fs::FS &fs, const char *path)
+{
+  Serial.printf("Reading file: %s\r\n", path);
+  File file = fs.open(path, "r");
+  if (!file || file.isDirectory())
+  {
+    Serial.println("- failed to open file for reading");
+    return String();
+  }
+  String fileContent;
+  while (file.available())
+  {
+    fileContent = file.readStringUntil('\n');
+    break;
+  }
+  file.close();
+  return fileContent;
+}
 
-// Initialize WiFi
+// Hàm viết file
+void writeFile(fs::FS &fs, const char *path, const char *message)
+{
+  Serial.printf("Writing file: %s\r\n", path);
+  File file = fs.open(path, "w");
+  if (!file)
+  {
+    Serial.println("- failed to open file for writing");
+    return;
+  }
+  if (file.print(message))
+    Serial.println("- file written");
+
+  else
+
+    Serial.println("- frite failed");
+
+  file.close();
+}
+
+// Khởi tạo Wifi
 bool initWiFi()
 {
-    if (ssid == "")
+  if (ssid == "")
+  {
+    Serial.println("Undefined SSID or IP address.");
+    return false;
+  }
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  Serial.println("Connecting to WiFi...");
+
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    for (int i = 0; i < 3; i++)
     {
-        Serial.println("Undefined SSID or IP address.");
-        return false;
+      pcf.digitalWrite(LED_2, LOW);
+      delay(50);
+      pcf.digitalWrite(LED_2, HIGH);
+      delay(50);
     }
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    Serial.println("Connecting to WiFi...");
-    while (WiFi.status() != WL_CONNECTED)
+    delay(500);
+  }
+  return true;
+}
+
+// setup PN532
+void setup_PN532()
+{
+  uint32_t versiondata = nfc.getFirmwareVersion();
+  if (!versiondata)
+  {
+    Serial.print("Didn't find PN53x board");
+    delay(1000);
+    ESP.restart();
+  }
+  // Got ok data, print it out!
+  Serial.print("Found chip PN5");
+  Serial.println((versiondata >> 24) & 0xFF, HEX);
+  Serial.print("Firmware ver. ");
+  Serial.print((versiondata >> 16) & 0xFF, DEC);
+  Serial.print('.');
+  Serial.println((versiondata >> 8) & 0xFF, DEC);
+  // configure board to read RFID tags
+  nfc.SAMConfig();
+}
+
+// read nfc
+String ReadBlock(uint8_t *keya, uint8_t block)
+{
+  String s_data;
+  uint8_t success;
+  Serial.println("Found an ISO14443A card");
+  Serial.print("  UID Length: ");
+  Serial.print(uidLength, DEC);
+  Serial.println(" bytes");
+  Serial.print("  UID Value: ");
+  // Xử lý biến CardUID thành chuỗi:
+  s_CardUID = "";
+  for (int i = 0; i < uidLength; i++)
+  {
+    s_CardUID += String(CardUID[i], HEX);
+    s_CardUID += ' ';
+  }
+  Serial.println(s_CardUID);
+  Serial.println("");
+
+  if (uidLength == 4)
+  {
+    // Xác thực Key A
+    Serial.println("Seems to be a Mifare Classic card (4 byte UID)");
+    Serial.println("Trying to authenticate block 4 with default KEYA value");
+    success = nfc.mifareclassic_AuthenticateBlock(CardUID, uidLength, block, 0, keya);
+    if (success)
     {
-        Serial.print(".");
-        for (int i = 0; i < 3; i++)
-        {
-            digitalWrite(ken, HIGH);
-            delay(50);
-            digitalWrite(ken, LOW);
+      Serial.println("Sector 1 (Blocks 4..7) has been authenticated");
+      uint8_t data[16];
+      // Đọc thẻ
+      success = nfc.mifareclassic_ReadDataBlock(block, data);
+
+      if (success)
+      {
+        Serial.print("Reading Block...");
+        for (int i = 0; i < 16; i++)
+          s_data += (char)data[i];
+        Serial.println("Done.");
+        valid = true;
+        return s_data;
+      }
+
+      else
+        Serial.println("Ooops ... unable to read the requested block.  Try another key?");
+    }
+    else
+      Serial.println("Ooops ... authentication failed: Try another key?");
+  }
+  valid = false;
+  return "";
+}
+
+// Hàm đọc file JSON
+String readFileJson(fs::FS &fs, const char *path, String sscid)
+{
+  File file = fs.open(path, "r");
+  if (!file || file.isDirectory())
+  {
+    Serial.println("- empty file or failed to open file");
+    return "";
+  }
+
+  DynamicJsonDocument doc(13000);
+  // Deserialize the JSON document
+  DeserializationError error = deserializeJson(doc, file);
+
+  String ten = doc[sscid];
+  file.close();
+  return ten;
+}
+
+// Xử lý tên trên 14 ký tự:
+String overName(String name)
+{
+  int len_ten = name.length();
+  int index_cuoi = name.lastIndexOf(' ');
+  String temp;
+  temp += name[0];
+  temp += '.';
+  for (int i = 1; i < len_ten; i++)
+  {
+    if ((name[i] == ' ') && (index_cuoi != i))
+    {
+      temp += name[i + 1];
+      temp += '.';
+    }
+    else if ((name[i] == ' ') && (index_cuoi == i))
+    {
+      temp += name.substring(index_cuoi + 1, len_ten);
+      break;
+    }
+  }
+  return temp;
+}
+
+// Xử lấy lấy thông tin thời gian từ API:
+String GetTimeFromAPI()
+{
+  int checkAPI = http.begin(API_Time);
+  if (checkAPI)
+  {
+    int cod = http.GET();
+    if (cod == HTTP_CODE_OK)
+    {
+      // Init for Json
+      String data = http.getString();
+      DynamicJsonDocument doc(1000);
+      DeserializationError error = deserializeJson(doc, data);
+      const char *dataTime = doc["datetime"];
+      // format date time:
+      String time = "";
+      for (int i = 0; i < strlen(dataTime); i++)
+      {
+        if (dataTime[i] == 'T')
+          time += "|";
+        else if (dataTime[i] == '.')
+          break;
+        else if (dataTime[i] == '-')
+          time += " ";
+        else
+          time += dataTime[i];
+      }
+      return time;
+    }
+    else
+      Serial.printf("date time-[HTTP] GET... failed, error: %s\n", http.errorToString(cod).c_str());
+    http.end();
+  }
+  return GetTimeFromAPI();
+}
+
+void SetBeginTime()
+{
+  String beginTime = GetTimeFromAPI();
+  Serial.println(beginTime);
+  rtc.setTime(beginTime.substring(17, 19).toInt(), beginTime.substring(14, 16).toInt(), beginTime.substring(11, 13).toInt() - 1, beginTime.substring(8, 10).toInt(), beginTime.substring(5, 7).toInt(), beginTime.substring(0, 4).toInt()); // 17th Jan 2021 15:24:30
+}
+
+// In thông báo lỗi:
+void errorDisplay()
+{
+  // Nếu bị lỗi:
+  lcd.clear();
+  lcd.setCursor(8, 1);
+  lcd.print("LOI");
+  lcd.setCursor(1, 2);
+  lcd.print("VUI LONG THU LAI!");
+}
+//------------------------------------------
+// kèn:
+void KenKeu()
+{
+  // kèn
+  pcf.digitalWrite(SOUND, LOW);
+  pcf.digitalWrite(LED_3, HIGH);
+  delay(200);
+  pcf.digitalWrite(SOUND, HIGH);
+  pcf.digitalWrite(LED_3, LOW);
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------//
+void setup()
+{
+  Serial.begin(115200);
+  nfc.begin();
+  setup_PN532();
+  initSPIFFS();
+
+  // Init PCF
+  pcf.begin();
+  for (int i = 0; i < 6; i++)
+    pcf.pinMode(i, OUTPUT);
+  pcf.digitalWrite(SOUND, HIGH); // Lỗi đi dây
+  pcf.digitalWrite(LCD_SCREEN, HIGH);
+
+  // LOADING
+  lcd.begin(20, 4);
+  lcd.clear();
+  lcd.setCursor(5, 2);
+  lcd.print("LOADING...");
+
+  // đọc và lưu giá trị ở tệp
+  ssid = readFile(SPIFFS, ssidPath);
+  pass = readFile(SPIFFS, passPath);
+  terminal_id = readFile(SPIFFS, terminal_idPath);
+  URL_server = readFile(SPIFFS, URL_serverPath);
+  AP_name = readFile(SPIFFS, AP_namePath);
+  AP_pass = readFile(SPIFFS, AP_passPath);
+
+  Serial.println(ssid);
+  Serial.println(pass);
+  Serial.println(terminal_id);
+  Serial.println(URL_server);
+  Serial.println(AP_name);
+  Serial.println(AP_pass);
+  TerminalID = terminal_id;
+
+  // Kích hoạt chế độ AP
+  if (!WiFi.softAP(AP_name.c_str(), AP_pass.c_str()))
+  {
+    log_e("Soft AP creation failed.");
+    ESP.restart();
+  }
+  localIP = WiFi.softAPIP();
+  Serial.print("AP IP address: ");
+  Serial.println(localIP);
+
+  // Web Server Root URL
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+            { request->send(SPIFFS, "/device_config.html", "text/html"); });
+
+  server.serveStatic("/", SPIFFS, "/");
+
+  server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
+    int params = request->params();
+    for(int i=0;i<params;i++){
+      AsyncWebParameter* p = request->getParam(i);
+      if(p->isPost()){
+        // HTTP POST ssid value
+        if (p->name() == PARAM_INPUT_1) {
+          ssid = p->value().c_str();
+          Serial.print("SSID set to: ");
+          Serial.println(ssid);
+          // Write file to save value
+          writeFile(SPIFFS, ssidPath, ssid.c_str());
         }
-        delay(500);
+        // HTTP POST pass value
+        if (p->name() == PARAM_INPUT_2) {
+          pass = p->value().c_str();
+          Serial.print("Password set to: ");
+          Serial.println(pass);
+          // Write file to save value
+          writeFile(SPIFFS, passPath, pass.c_str());
+        }
+        // HTTP POST terminal_id value
+        if (p->name() == PARAM_INPUT_3) {
+          terminal_id = p->value().c_str();
+          Serial.print("Terminal ID set to: ");
+          Serial.println(terminal_id);
+          // Write file to save value
+          writeFile(SPIFFS, terminal_idPath, terminal_id.c_str());
+        }
+        // HTTP POST server value
+        if (p->name() == PARAM_INPUT_4) {
+          URL_server = p->value().c_str();
+          Serial.print("server address set to: ");
+          Serial.println(URL_server);
+          // Write file to save value
+          writeFile(SPIFFS, URL_serverPath, URL_server.c_str());
+        }
+        // HTTP POST AP name value
+        if (p->name() == PARAM_INPUT_5) {
+          AP_name = p->value().c_str();
+          Serial.print("AP name set to: ");
+          Serial.println(AP_name);
+          // Write file to save value
+          writeFile(SPIFFS, AP_namePath, AP_name.c_str());
+        }
+        // HTTP POST AP pass value
+        if (p->name() == PARAM_INPUT_6) {
+          AP_pass = p->value().c_str();
+          Serial.print("AP pass set to: ");
+          Serial.println(AP_pass);
+          // Write file to save value
+          writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
+        }
+        //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+      }
     }
+    restart = true;
+    request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: http://192.168.4.1/"); });
+
+  server.begin();
+
+  // Kết nối WiFi
+  if (initWiFi())
+  {
+    // setup RealTime
+    delay(1000);
+    SetBeginTime();
     lcd.clear();
     lcd.setCursor(1, 1);
     lcd.print("THIET BI DIEM DANH");
@@ -163,400 +455,103 @@ bool initWiFi()
     lcd.print("CONG TY DIEN TU C&T");
     Serial.print("\nConnected!, IP address: ");
     Serial.println(WiFi.localIP());
-    return true;
-}
-//--------------------------------------------------------------------------------------------------------------------------------------------------------------//
-void setup()
-{
-    Serial.begin(112500); // Initialize serial communications with the PC
-    initSPIFFS();       // Init initSPIFFS
-    SPI.begin();      // Init SPI bus
-    mfrc522.PCD_Init();   // Init MFRC522 card
-
-    pinMode(ken, OUTPUT); // Init ken
-    lcd.init();           // Init lcd
-    lcd.backlight();
-    lcd.setCursor(5, 2);
-    lcd.print("LOADING...");
-    // đọc và lưa giá trị ở tệp
-    ssid = readFile(SPIFFS, ssidPath);
-    pass = readFile(SPIFFS, passPath);
-    terminal_id = readFile(SPIFFS, terminal_idPath);
-    URL_server = readFile(SPIFFS, URL_serverPath);
-    AP_name = readFile(SPIFFS, AP_namePath);
-    AP_pass = readFile(SPIFFS, AP_passPath);
-
-    Serial.println(ssid);
-    Serial.println(pass);
-    Serial.println(terminal_id);
-    Serial.println(URL_server);
-    Serial.println(AP_name);
-    Serial.println(AP_pass);
-
-    // Kích hoạt chế độ AP
-    Serial.println("Setting AP (Access Point)");
-    Serial.print("Configuring access point...");
-    WiFi.softAP(AP_name.c_str(), AP_pass.c_str());
-    IPAddress IP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
-    Serial.println(IP);
-
-    //Kết nối WiFi
-    initWiFi();
-
-    // Web Server Root URL
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
-              { request->send(SPIFFS, "/device_config.html", "text/html"); });
-
-    server.serveStatic("/", SPIFFS, "/");
-
-    server.on("/", HTTP_POST, [](AsyncWebServerRequest *request)
-              {
-      int params = request->params();
-      for(int i=0;i<params;i++){
-        AsyncWebParameter* p = request->getParam(i);
-        if(p->isPost()){
-          // HTTP POST ssid value
-          if (p->name() == PARAM_INPUT_1) {
-            ssid = p->value().c_str();
-            Serial.print("SSID set to: ");
-            Serial.println(ssid);
-            // Write file to save value
-            writeFile(SPIFFS, ssidPath, ssid.c_str());
-          }
-          // HTTP POST pass value
-          if (p->name() == PARAM_INPUT_2) {
-            pass = p->value().c_str();
-            Serial.print("Password set to: ");
-            Serial.println(pass);
-            // Write file to save value
-            writeFile(SPIFFS, passPath, pass.c_str());
-          }
-          // HTTP POST terminal_id value
-          if (p->name() == PARAM_INPUT_3) {
-            terminal_id = p->value().c_str();
-            Serial.print("Terminal ID set to: ");
-            Serial.println(terminal_id);
-            // Write file to save value
-            writeFile(SPIFFS, terminal_idPath, terminal_id.c_str());
-          }
-          // HTTP POST server value
-          if (p->name() == PARAM_INPUT_4) {
-            URL_server = p->value().c_str();
-            Serial.print("server address set to: ");
-            Serial.println(URL_server);
-            // Write file to save value
-            writeFile(SPIFFS, URL_serverPath, URL_server.c_str());
-          }
-          // HTTP POST AP name value
-          if (p->name() == PARAM_INPUT_5) {
-            AP_name = p->value().c_str();
-            Serial.print("AP name set to: ");
-            Serial.println(AP_name);
-            // Write file to save value
-            writeFile(SPIFFS, AP_namePath, AP_name.c_str());
-          }
-          // HTTP POST AP pass value
-          if (p->name() == PARAM_INPUT_6) {
-            AP_pass = p->value().c_str();
-            Serial.print("AP pass set to: ");
-            Serial.println(AP_pass);
-            // Write file to save value
-            writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
-          }
-          //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
-        }
-      }
-      restart = true;
-      request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: http://192.168.4.1/"); });
-
-    server.begin();
+    pcf.digitalWrite(LED_2, HIGH);
+  }
 }
 //*****************************************************************************************//
 void loop()
 {
-    if (restart)
-    {
-        delay(5000);
-        ESP.restart();
-    }
-
-    // khai báo các biến
-    byte CardUID[18];
-    String s_CardUID = "";
-    String TerminalID = terminal_id;
-    byte SSCID[18];
-    String s_SSCID = "";
-    byte Name1[18];
-    String s_Name1 = "";
-    byte Name2[18];
-    String s_Name2 = "";
-
-    // Prepare key - all keys are set to FFFFFFFFFFFFh at chip delivery from the factory.
-
-    for (byte i = 0; i < 6; i++)
-        key.keyByte[i] = 0xFF;
-    // key.keyByte[0] = 0x01;
-    // key.keyByte[1] = 0x02;
-    // key.keyByte[2] = 0x03;
-    // key.keyByte[3] = 0x04;
-    // key.keyByte[4] = 0x05;
-    // key.keyByte[5] = 0x06;
-
-    // some variables we need
-    byte block;
-    byte len;
-    String temp;
-    MFRC522::StatusCode status;
-
-    //-------------------------------------------
-
-    // Reset the loop if no new card present on the sensor/reader. This saves the entire process when idle.
-    if (!mfrc522.PICC_IsNewCardPresent())
-        return;
-
-    // Select one of the cards
-    if (!mfrc522.PICC_ReadCardSerial())
-        return;
-
+  if (restart)
+  {
+    delay(5000);
+    ESP.restart();
+  }
+  // kiểm tra thẻ mới
+  checkCard = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, CardUID, &uidLength);
+  if (checkCard)
+  {
     Serial.println(F("**Card Detected:**"));
-
-    // Lưu UID Card vào biến
-    for (byte i = 0; i < 4; i++)
-    {
-        CardUID[i] = mfrc522.uid.uidByte[i];
-        if (CardUID[i] < 0x10)
-            s_CardUID += "0" + String(CardUID[i]);
-        else
-            s_CardUID += String(CardUID[i]);
-    }
-
-    mfrc522.PICC_DumpDetailsToSerial(&(mfrc522.uid)); // dump some details about the card
-
-    // mfrc522.PICC_DumpToSerial(&(mfrc522.uid));      //uncomment this to see all blocks in hex
-
-    //-------------------------------------------------------------------------------------------------*
-    // Xử lý biến SSCID
-    Serial.print("block4: ");
-    block = 4;
-    len = 18;
-
-    readBlock(block, len, SSCID, status);
-
-    temp = String((char *)SSCID);
-    for (int i = 0; i < 16; i++)
-    {
-        s_SSCID += temp[i];
-    }
-    // PRINT SSID
-    for (uint8_t i = 0; i < 16; i++)
-    {
-        if (SSCID[i] != 32)
-        {
-            Serial.write(SSCID[i]);
-        }
-    }
-    Serial.println("");
-
-    //-------------------------------------------------------------------------------------------------*
-    // Xử lý biến Name1
-    Serial.print("block5: ");
-    block = 5;
-    len = 18;
-    readBlock(block, len, Name1, status);
-
-    temp = String((char *)Name1);
-
-    for (int i = 0; i < 16; i++)
-    {
-        if (Name1[i] != 0x0)
-        {
-            s_Name1 += temp[i];
-        }
-    }
-    // print Name1
-    for (uint8_t i = 0; i < 16; i++)
-    {
-        Serial.write(Name1[i]);
-    }
-    Serial.println("");
-    //-------------------------------------------------------------------------------------------------*
-    // Xử lý biến Name2
-    Serial.print("block6: ");
-    block = 6;
-    len = 18;
-
-    readBlock(block, len, Name2, status);
-
-    temp = String((char *)Name2);
-
-    for (int i = 0; i < 16; i++)
-    {
-        if (Name2[i] != 0x0)
-        {
-            s_Name2 += temp[i];
-        }
-    }
-    // PRINT Name2
-    for (uint8_t i = 0; i < 16; i++)
-    {
-        if (Name2[i] != 0x0)
-        {
-            Serial.write(Name2[i]);
-        }
-    }
-    Serial.println("");
-    //-------------------------------------------------------------------------------------------------*
+    SSCID = ReadBlock(key, 4);
     Serial.println(F("\n**End Reading**\n"));
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
+    Serial.println("Data: " + SSCID);
 
-    //-------------------------------------------------------------------------------------------------*
-    // In lên màn hình:
-    lcd.clear();
-
-    //Xử lý biến name
-    String s_Name = s_Name1 + s_Name2;
-    int len_name = s_Name.length();
-    for (int i = len_name-1; i >= 0; i--){
-        // Serial.print(i);
-        // Serial.print("\t");
-        // Serial.println(a[i]);
-        if(s_Name[i] != ' '){
-        s_Name = s_Name.substring(0,i+1);
-        len_name = s_Name.length();
-        // Serial.println(s_Name);
-        // Serial.println(len_name);
-        break;
-        }
-    }
-
-
-    // in SSCID lên LCD
-    lcd.setCursor(0, 1);
-    lcd.print("ID: ");
-    lcd.print(s_SSCID);
-
-    //in mã thiết bị lên LCD
-    lcd.rightToLeft();
-    lcd.setCursor(0, 3);
-    lcd.print(TerminalID);
-    lcd.leftToRight();
-
-    // Nếu bị lỗi:
-    if (!xacthuc)
+    if (!valid)
     {
-        lcd.clear();
-        lcd.setCursor(8, 1);
-        lcd.print("LOI");
-        lcd.setCursor(1, 2);
-        lcd.print("VUI LONG THU LAI!");
-    }
-
-    // kèn
-    digitalWrite(ken, HIGH);
-    delay(200);
-    digitalWrite(ken, LOW);
-
-    //-------------------------------------------------------------------------------------------------*
-    // POST lên server
-    if (xacthuc)
-    {
-        StaticJsonDocument<200> doc; // khai báo chỗ chứa dữ liệu
-        String jsonData;
-        doc["TerminalID"] = TerminalID;
-        doc["CardUID"] = s_CardUID;
-        doc["SSCID"] = s_SSCID;
-        doc["Name"] = s_Name;
-        serializeJsonPretty(doc, jsonData);
-
-        // std::unique_ptr<BearSSL::WiFiClientSecure>clients(new BearSSL::WiFiClientSecure);
-        // clients->setFingerprint(fingerprint);
-
-        Serial.print("[HTTP] begin...\n");
-        // configure traged server and url
-        http.begin(client, URL_server + "/api/nfc-tab/test"); // HTTP  
-        // http.begin(*clients, URL_server + "/api/nfc-tab/test"); // HTTPS
-        http.addHeader("Content-Type", "application/json");
-
-        Serial.print("[HTTP] POST...\n");
-        // start connection and send HTTP header and body
-        int httpCode = http.POST(jsonData);
-
-        // httpCode will be negative on err or
-        if (httpCode > 0)
-        {
-            // HTTP header has been send and Server response header has been handled
-            Serial.printf("[HTTP] POST... code: %d\n", httpCode);
-
-            // file found at server
-            if (httpCode == HTTP_CODE_OK)
-            {
-                const String &payload = http.getString();
-                Serial.println("received payload:\n");
-                Serial.println(payload);
-
-                //-------------------------------------------------------------------------------------------------*
-                // GET
-                StaticJsonDocument<200> doc2;   // tạo doc chứa data
-                deserializeJson(doc2, payload); // fix payload(dữ liệu từ server trả về) với doc2
-                JsonObject obj = doc2.as<JsonObject>();
-                String data = obj["Data"];   // lấy dữ liệu tên Data
-                deserializeJson(doc2, data); // Vì Data là 1 JSON cho nên phải fix data thêm 1 lần nữa
-                JsonObject obj2 = doc2.as<JsonObject>();
-                const char *data_Time = obj2["Time"]; // lấy real time
-                const char* data_Name = obj2["Name"];// lấy Name
-
-                //Xư lý Real Time
-                String RealTime = String(data_Time); 
-                String RealTime1 = RealTime.substring(0,10);
-                String RealTime1_list[] = {RealTime1.substring(8,10),RealTime1.substring(5,7),RealTime1.substring(0,4)};
-                RealTime1 = RealTime1_list[0] + "/" + RealTime1_list[1] + "/" + RealTime1_list[2];
-                String RealTime2 = RealTime.substring(11,16);
-
-                //Name
-                String Name_API = String(data_Name);
-                //Serial.println(Name_API);
-                int len_name = Name_API.length();
-                //In Name len LCD
-                lcd.setCursor(0, 0);
-                String lst[10] = {"","","","","","","","","","",};
-                splitName(Name_API,lst);
-                if(len_name > 21){
-                    for (int i = 1; i < lst->length(); i ++){
-                    if(lst[i+1] != ""){
-                        lst[i] = lst[i].substring(0,1);
-                    }
-                    else
-                        break;
-                    }
-                }
-                for (int i = 0; i < lst->length(); i ++){
-                    if ((lst[i].length() == 1) && (lst[i+1].length() == 1)){
-                        Serial.print(lst[i]);
-                        lcd.print(lst[i]);
-                    }
-                    else{
-                        Serial.print(lst[i]+" ");
-                        lcd.print(lst[i]);
-                        lcd.print(" ");
-                    }
-
-                }
-                
-                // in RealTime lên LCD
-                lcd.setCursor(0, 2);
-                lcd.print(RealTime1);
-                lcd.print(" ");
-                lcd.print(RealTime2);
-            }
-            else
-                Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
-        }
-        http.end();
+      errorDisplay();
+      KenKeu();
     }
     else
-        xacthuc = true;
-    delay(300);
-    //-------------------------------------------
+    {
+      lcd.clear();
+      // In tên lên lcd:
+      lcd.setCursor(0, 0);
+      lcd.print("Name: ");
+      Name_st = readFileJson(SPIFFS, "/students_list.json", SSCID);
+      if (Name_st.length() > 14)
+      {
+        Name_display = overName(Name_st);
+        lcd.print(Name_display);
+      }
+      else
+        lcd.print(Name_st);
+      // in SSCID lên LCD
+      lcd.setCursor(0, 1);
+      lcd.print("ID: ");
+      lcd.print(SSCID);
+      // In Thời gian lên lcd:
+      timer = rtc.getTime("%d/%m/%Y %H:%M:%S");
+      lcd.setCursor(0, 2);
+      lcd.print(timer);
+      // in mã thiết bị lên LCD
+      lcd.setCursor(0, 3);
+      lcd.print("Device: ");
+      lcd.print(TerminalID);
+
+      KenKeu();
+
+      // POST lên server
+      StaticJsonDocument<200> doc; // khai báo chỗ chứa dữ liệu
+      String jsonData;
+      doc["TerminalID"] = TerminalID;
+      doc["CardUID"] = s_CardUID;
+      doc["SSCID"] = SSCID;
+      doc["Name"] = Name_st;
+      serializeJsonPretty(doc, jsonData);
+      Serial.print("[HTTP] begin...\n");
+      // configure traged server and url
+      http.begin(client, URL_server + "/api/nfc-tab/test"); // HTTP
+      // http.begin(*clients, URL_server + "/api/nfc-tab/test"); // HTTPS
+      http.addHeader("Content-Type", "application/json");
+
+      Serial.print("[HTTP] POST...\n");
+      // start connection and send HTTP header and body
+      int httpCode = http.POST(jsonData);
+
+      // httpCode will be negative on error
+      if (httpCode > 0)
+      {
+        // HTTP header has been send and Server response header has been handled
+        Serial.printf("[HTTP] POST... code: %d\n", httpCode);
+
+        // file found at server
+        if (httpCode == HTTP_CODE_OK)
+        {
+          const String &payload = http.getString();
+          Serial.println("received payload:\n");
+          Serial.println(payload);
+          pcf.digitalWrite(LED_4, HIGH);
+          delay(700);
+          pcf.digitalWrite(LED_4, LOW);
+        }
+        else
+        {
+          pcf.digitalWrite(LED_5, HIGH);
+          delay(700);
+          pcf.digitalWrite(LED_5, LOW);
+          Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
+        }
+      }
+      http.end();
+    }
+  }
 }
