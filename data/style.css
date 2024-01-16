@@ -33,7 +33,7 @@ body {
   max-width: 800px; 
   margin: 0 auto; 
   display: grid; 
-  grid-gap: 2rem; 
+  gap: 20xp; 
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 

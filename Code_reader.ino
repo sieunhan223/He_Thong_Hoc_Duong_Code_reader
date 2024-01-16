@@ -46,11 +46,13 @@ const char *PARAM_INPUT_3 = "terminal_id";
 const char *PARAM_INPUT_4 = "URL_server";
 const char *PARAM_INPUT_5 = "AP_name";
 const char *PARAM_INPUT_6 = "AP_pass";
+const char *PARAM_INPUT_7 = "jsonFile";
 // Biến lưu các giá trị từ HTML form
 String ssid, pass;
 String terminal_id;
 String URL_server;
 String AP_name, AP_pass;
+String jsonFile;
 // Các biến kiểm tra
 boolean restart = false, valid = true;
 String checkSSCID = "";
@@ -61,6 +63,7 @@ const char *terminal_idPath = "/terminal_id.txt";
 const char *URL_serverPath = "/URL_server.txt";
 const char *AP_namePath = "/AP_name.txt";
 const char *AP_passPath = "/AP_pass.txt";
+const char *Students_list_path = "/students_list.json";
 
 // http://192.168.4.1/ : AP IP Address
 
@@ -355,6 +358,7 @@ void setup()
   URL_server = readFile(SPIFFS, URL_serverPath);
   AP_name = readFile(SPIFFS, AP_namePath);
   AP_pass = readFile(SPIFFS, AP_passPath);
+  jsonFile = readFile(SPIFFS, Students_list_path);
 
   Serial.println(ssid);
   Serial.println(pass);
@@ -362,6 +366,7 @@ void setup()
   Serial.println(URL_server);
   Serial.println(AP_name);
   Serial.println(AP_pass);
+  Serial.println(jsonFile);
   TerminalID = terminal_id;
 
   // Kích hoạt chế độ AP
@@ -434,7 +439,34 @@ void setup()
           // Write file to save value
           writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
         }
-        //Serial.printf("POST[%s]: %s\n", p->name().c_str(), p->value().c_str());
+        // HTTP POST Studen List value
+        // if (p->name() == PARAM_INPUT_7) {
+        //     File file = SPIFFS.open("/students_list.json", "w");
+        //     // Đọc dữ liệu từ tệp tải lên và lưu vào tệp /data.json
+        //     size_t fileSize = p->size(); // Kích thước tệp
+        //     uint8_t buffer[fileSize];
+        //     p->value().getBytes(buffer, fileSize);
+        //     file.write(buffer, fileSize);
+        //     file.close();
+        //     // Lưu dữ liệu vào tệp /data.json trong bộ nhớ
+
+        //     if (!file) {
+        //       Serial.println("Failed to open file for writing");
+        //     } else {
+        //       // Đặt nội dung vào một cấu trúc JSON
+        //       DynamicJsonDocument doc(1024*20); // Thay đổi kích thước dựa trên kích thước của dữ liệu JSON
+        //       DeserializationError error = deserializeJson(doc, buffer);
+              
+        //       if (error) {
+        //         Serial.println("Failed to parse JSON");
+        //       } else {
+        //         // Ghi dữ liệu JSON vào tệp
+        //         serializeJson(doc, file);
+        //         file.close();
+        //         Serial.println("JSON data saved successfully");
+        //     }
+        //   }
+        // }
       }
     }
     restart = true;
