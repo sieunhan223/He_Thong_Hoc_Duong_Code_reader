@@ -34,6 +34,7 @@ uint8_t key[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 uint8_t checkCard;
 // khai báo các biến
 uint8_t CardUID[] = {0, 0, 0, 0, 0, 0, 0};
+uint8_t CardUID4Byte[] = {0, 0, 0, 0};
 uint8_t uidLength; // Length of the UID (4 or 7 bytes depending on ISO14443A card type)
 String TerminalID = "";
 String SSCID = "";
@@ -46,7 +47,6 @@ const char *PARAM_INPUT_3 = "terminal_id";
 const char *PARAM_INPUT_4 = "URL_server";
 const char *PARAM_INPUT_5 = "AP_name";
 const char *PARAM_INPUT_6 = "AP_pass";
-const char *PARAM_INPUT_7 = "jsonFile";
 // Biến lưu các giá trị từ HTML form
 String ssid, pass;
 String terminal_id;
@@ -170,7 +170,7 @@ void setup_PN532()
 }
 
 // read nfc
-String ReadBlock(uint8_t *keya, uint8_t block)
+String ReadBlock(uint8_t *keyAuthen, uint8_t block)
 {
   String s_data;
   uint8_t success;
@@ -179,22 +179,28 @@ String ReadBlock(uint8_t *keya, uint8_t block)
   Serial.print(uidLength, DEC);
   Serial.println(" bytes");
   Serial.print("  UID Value: ");
-  // Xử lý biến CardUID thành chuỗi:
-  s_CardUID = "";
-  for (int i = 0; i < uidLength; i++)
-  {
-    s_CardUID += String(CardUID[i], HEX);
-    s_CardUID += ' ';
-  }
-  Serial.println(s_CardUID);
-  Serial.println("");
 
   if (uidLength == 4)
   {
+    for(int i = 0; i < uidLength; i++){
+      Serial.print(CardUID[i], HEX);
+      Serial.print(":");
+    }
+    Serial.println();
+    // Xử lý biến CardUID thành chuỗi:
+    s_CardUID = "";
+    for (int i = 0; i < uidLength; i++)
+    {
+      s_CardUID += String(CardUID[i], HEX);
+      s_CardUID += ' ';
+    }
+    Serial.print("Chuoi_UID: ");
+    Serial.println(s_CardUID);
+    Serial.println("");
     // Xác thực Key A
     Serial.println("Seems to be a Mifare Classic card (4 byte UID)");
-    Serial.println("Trying to authenticate block 4 with default KEYA value");
-    success = nfc.mifareclassic_AuthenticateBlock(CardUID, uidLength, block, 0, keya);
+    Serial.println("Trying to authenticate block 4 with default keyAuthen value");
+    success = nfc.mifareclassic_AuthenticateBlock(CardUID, uidLength, block, 1, keyAuthen);
     if (success)
     {
       Serial.println("Sector 1 (Blocks 4..7) has been authenticated");
@@ -207,6 +213,63 @@ String ReadBlock(uint8_t *keya, uint8_t block)
         Serial.print("Reading Block...");
         for (int i = 0; i < 16; i++)
           s_data += (char)data[i];
+        Serial.println("Done.");
+        valid = true;
+        return s_data;
+      }
+
+      else
+        Serial.println("Ooops ... unable to read the requested block.  Try another key?");
+    }
+    else
+      Serial.println("Ooops ... authentication failed: Try another key?");
+  }
+
+  if (uidLength == 7)
+  {
+    for(int i = 0; i < uidLength; i++){
+      Serial.print(CardUID[i], HEX);
+      Serial.print(":");
+    }
+    Serial.println();
+    // Xử lý biến CardUID thành chuỗi:
+    s_CardUID = "";
+    for (int i = 0; i < uidLength; i++)
+    {
+      s_CardUID += String(CardUID[i], HEX);
+      s_CardUID += ' ';
+    }
+    Serial.print("Chuoi_UID: ");
+    Serial.println(s_CardUID);
+    Serial.println("");
+    for (int i = 0; i < 4; i++){
+      CardUID4Byte[i] = CardUID[3 + i];
+      // Serial.print(CardUID4Byte[i]);
+      // Serial.print(":");
+    }  
+    // Serial.println();
+    // Xác thực Key A
+    Serial.println("Seems to be a Mifare card (7 byte UID)");
+    Serial.println("Trying to authenticate block");
+    success = nfc.mifareclassic_AuthenticateBlock(CardUID4Byte, 4, block, 1, keyAuthen);
+    if (success)
+    {
+      Serial.println("Sector 1 (Blocks 4..7) has been authenticated");
+      uint8_t data[16];
+      // Đọc thẻ
+      success = nfc.mifareclassic_ReadDataBlock(block, data);
+
+      if (success)
+      {
+        Serial.print("Reading Block...");
+        for (int i = 0; i < 16; i++){
+          if (data[i] != 255){
+            s_data += (char)data[i];
+          }
+          else
+            break;
+        }
+          
         Serial.println("Done.");
         valid = true;
         return s_data;
@@ -503,7 +566,7 @@ void loop()
   if (checkCard)
   {
     Serial.println(F("**Card Detected:**"));
-    SSCID = ReadBlock(key, 4);
+    SSCID = ReadBlock(key, 2);
     Serial.println(F("\n**End Reading**\n"));
     Serial.println("Data: " + SSCID);
 
