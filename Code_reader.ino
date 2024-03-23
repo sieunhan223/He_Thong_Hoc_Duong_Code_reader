@@ -260,27 +260,54 @@ String postDataHTTPS(const char *lstData[10][2], int soLuong, String endpoint, S
   return "None";
 }
 
+bool whileTrueCallAPIAttendance(const char *lst[10][2])
+{
+  dataResponse = postDataHTTPS(lst, 4, "/api/v1/schools/attendance", "Post Data");
 
-void whileTrueCallAPIAttendance(const char* lst[10][2]){
-      dataResponse = postDataHTTPS(lst, 4, "/api/v1/schools/attendance", "Post Data");
+  StaticJsonDocument<1024> doc;
+  DeserializationError e = deserializeJson(doc, dataResponse);
 
-      StaticJsonDocument<1024> doc;
-      DeserializationError e = deserializeJson(doc, dataResponse);
-      const char *mes = doc["message"];
-      Serial.print("code: ");
-      Serial.println(mes);
-      if ((String(mes) == "Unauthorized") || (String(mes) == "Token Invalid") || (String(mes) == "Token Expired"))
-      {
-        doc.clear();
-        dataResponse = postDataHTTPS(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
-        e = deserializeJson(doc, dataResponse);
-        const char* tokenn_new = doc["data"]["token"];
-        tokenn = String(tokenn_new);
-        Serial.print("Token: ");
-        Serial.println(tokenn);
+  bool suc = doc["success"];
 
-        return whileTrueCallAPIAttendance(lst);
-      }
+  if (suc == false)
+  {
+    const char *mes = doc["message"];
+    const char *cod = doc["code"];
+    Serial.print("code: ");
+    Serial.println(cod);
+    Serial.print("message: ");
+    Serial.println(mes);
+
+    if ((String(mes) == "Unauthorized") || (String(mes) == "Token Invalid") || (String(mes) == "Token Expired"))
+    {
+      doc.clear();
+      dataResponse = postDataHTTPS(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
+      e = deserializeJson(doc, dataResponse);
+      const char *tokenn_new = doc["data"]["token"];
+      tokenn = String(tokenn_new);
+      Serial.print("Token: ");
+      Serial.println(tokenn);
+
+      return whileTrueCallAPIAttendance(lst);
+    }
+    if (String(cod) == "USER_INVALID")
+    {
+      // Dợi
+      lcd.clear();
+      lcd.setCursor(3, 1);
+      lcd.print("User Invalid!!");
+      return false;
+    }
+    else if (String(cod) == "USER_NOT_FOUND")
+    {
+      // Dợi
+      lcd.clear();
+      lcd.setCursor(0, 1);
+      lcd.print("User not found!");
+      return false;
+    }
+  }
+  return true;
 }
 
 // setup PN532
@@ -678,13 +705,13 @@ void setup()
     dataResponse = postDataHTTPS(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
     StaticJsonDocument<1024> docMain;
     DeserializationError e = deserializeJson(docMain, dataResponse);
-    if (!e){
-      const char* temp = docMain["data"]["token"];
+    if (!e)
+    {
+      const char *temp = docMain["data"]["token"];
       tokenn = String(temp);
       Serial.print("Token: ");
-      Serial.println(tokenn);    
+      Serial.println(tokenn);
     }
-
 
     lcd.clear();
     lcd.setCursor(1, 1);
@@ -736,7 +763,9 @@ void loop()
           {"serviceCode", "attendance"}};
       // Post dữ liệu
       // postDataHTTPS(ts, 4, "/api/v1/schools/attendance", "Post Data");
-      whileTrueCallAPIAttendance(dataAPI);
+      if (!whileTrueCallAPIAttendance(dataAPI)){
+        return;
+      };
 
       // In lên lcd:
       lcd.clear();
@@ -767,4 +796,3 @@ void loop()
     Serial.println("--------------------------------------------------------------------------------END--------------------------------------------------------------------------------");
   }
 }
-
