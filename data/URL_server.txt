@@ -1,1 +1,1 @@
-https://apissc.vietschool.vn/ssc/collection/api/v1/sys_diemdanh
+https://eco-card-api.finviet.com.vn:6868

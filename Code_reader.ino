@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <WiFiAP.h>
 #include <ArduinoJson.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
 #include <SPIFFS.h>
@@ -18,6 +19,11 @@
 #define LED_3 3
 #define LED_4 4
 #define LED_5 5
+
+// WiFiClientSecure *clients = new WiFiClientSecure;
+// HTTPClient https;
+// StaticJsonDocument<1024> doc; // khai báo chỗ chứa dữ liệu
+// String jsonData = "";
 
 // Init for ESP32 Timer
 ESP32Time rtc(3600); // offset in seconds GMT+1
@@ -55,7 +61,6 @@ String AP_name, AP_pass;
 String jsonFile;
 // Các biến kiểm tra
 boolean restart = false, valid = true;
-String checkSSCID = "";
 // Các đường dẫn chứa giá trị
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
@@ -63,15 +68,47 @@ const char *terminal_idPath = "/terminal_id.txt";
 const char *URL_serverPath = "/URL_server.txt";
 const char *AP_namePath = "/AP_name.txt";
 const char *AP_passPath = "/AP_pass.txt";
-const char *Students_list_path = "/students_list.json";
+// const char *Students_list_path = "/students_list.json";
 
+String tokenn;
+String dataResponse = "";
+
+const char *dataLoginAPI[10][2] = {
+    {"partnerCode", "FV_ATTENDANT_DEVICE"},
+    {"accessCode", "nz3EFcBdhsGm3x0nNYEa7O7XNTaS7s"}};
 // http://192.168.4.1/ : AP IP Address
 
 AsyncWebServer server(80);
-WiFiClient client;
-HTTPClient http;
-
 IPAddress localIP;
+
+const char *rootCACertificate =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIETjCCAzagAwIBAgINAe5fIh38YjvUMzqFVzANBgkqhkiG9w0BAQsFADBMMSAw\n"
+    "HgYDVQQLExdHbG9iYWxTaWduIFJvb3QgQ0EgLSBSMzETMBEGA1UEChMKR2xvYmFs\n"
+    "U2lnbjETMBEGA1UEAxMKR2xvYmFsU2lnbjAeFw0xODExMjEwMDAwMDBaFw0yODEx\n"
+    "MjEwMDAwMDBaMFAxCzAJBgNVBAYTAkJFMRkwFwYDVQQKExBHbG9iYWxTaWduIG52\n"
+    "LXNhMSYwJAYDVQQDEx1HbG9iYWxTaWduIFJTQSBPViBTU0wgQ0EgMjAxODCCASIw\n"
+    "DQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAKdaydUMGCEAI9WXD+uu3Vxoa2uP\n"
+    "UGATeoHLl+6OimGUSyZ59gSnKvuk2la77qCk8HuKf1UfR5NhDW5xUTolJAgvjOH3\n"
+    "idaSz6+zpz8w7bXfIa7+9UQX/dhj2S/TgVprX9NHsKzyqzskeU8fxy7quRU6fBhM\n"
+    "abO1IFkJXinDY+YuRluqlJBJDrnw9UqhCS98NE3QvADFBlV5Bs6i0BDxSEPouVq1\n"
+    "lVW9MdIbPYa+oewNEtssmSStR8JvA+Z6cLVwzM0nLKWMjsIYPJLJLnNvBhBWk0Cq\n"
+    "o8VS++XFBdZpaFwGue5RieGKDkFNm5KQConpFmvv73W+eka440eKHRwup08CAwEA\n"
+    "AaOCASkwggElMA4GA1UdDwEB/wQEAwIBhjASBgNVHRMBAf8ECDAGAQH/AgEAMB0G\n"
+    "A1UdDgQWBBT473/yzXhnqN5vjySNiPGHAwKz6zAfBgNVHSMEGDAWgBSP8Et/qC5F\n"
+    "JK5NUPpjmove4t0bvDA+BggrBgEFBQcBAQQyMDAwLgYIKwYBBQUHMAGGImh0dHA6\n"
+    "Ly9vY3NwMi5nbG9iYWxzaWduLmNvbS9yb290cjMwNgYDVR0fBC8wLTAroCmgJ4Yl\n"
+    "aHR0cDovL2NybC5nbG9iYWxzaWduLmNvbS9yb290LXIzLmNybDBHBgNVHSAEQDA+\n"
+    "MDwGBFUdIAAwNDAyBggrBgEFBQcCARYmaHR0cHM6Ly93d3cuZ2xvYmFsc2lnbi5j\n"
+    "b20vcmVwb3NpdG9yeS8wDQYJKoZIhvcNAQELBQADggEBAJmQyC1fQorUC2bbmANz\n"
+    "EdSIhlIoU4r7rd/9c446ZwTbw1MUcBQJfMPg+NccmBqixD7b6QDjynCy8SIwIVbb\n"
+    "0615XoFYC20UgDX1b10d65pHBf9ZjQCxQNqQmJYaumxtf4z1s4DfjGRzNpZ5eWl0\n"
+    "6r/4ngGPoJVpjemEuunl1Ig423g7mNA2eymw0lIYkN5SQwCuaifIFJ6GlazhgDEw\n"
+    "fpolu4usBCOmmQDo8dIm7A9+O4orkjgTHY+GzYZSR+Y0fFukAj6KYXwidlNalFMz\n"
+    "hriSqHKvoflShx8xpfywgVcvzfTO3PYkz6fiNJBonf6q8amaEsybwMbDqKWwIX7e\n"
+    "SPY=\n"
+    "-----END CERTIFICATE-----\n";
+
 //*****************************************************************************************//
 
 // Khởi tạo SPIFS
@@ -148,6 +185,104 @@ bool initWiFi()
   return true;
 }
 
+// gọi API bằng POST
+String postDataHTTPS(const char *lstData[10][2], int soLuong, String endpoint, String desc)
+{
+  Serial.printf("-----------%s-------------------\n", desc);
+  WiFiClientSecure *clients = new WiFiClientSecure;
+  HTTPClient https;
+
+  if (clients)
+  {
+    // doc.clear();
+    // Đặt client bảo mật với chứng chỉ
+    clients->setCACert(rootCACertificate);
+
+    // Tạo một đối tượng JSON để lưu trữ dữ liệu
+    StaticJsonDocument<1024> doc; // khai báo chỗ chứa dữ liệu
+    String jsonData = "";
+
+    for (int i = 0; i < soLuong; i++)
+    {
+      doc[lstData[i][0]] = lstData[i][1];
+    }
+
+    // Serialize JSON data
+    serializeJsonPretty(doc, jsonData);
+
+    // In ra JSON data trên Serial Monitor
+    Serial.println(jsonData);
+
+    // Khởi tạo kết nối HTTPS
+    Serial.print("[HTTPS] begin...\n");
+    if (https.begin(*clients, URL_server + endpoint))
+    {
+      if (desc == "Post Data")
+      {
+        // Thêm header Authorization vào yêu cầu HTTP
+
+        Serial.print("Token: ");
+        Serial.println(tokenn);
+        https.addHeader("Authorization", ("Bearer " + tokenn).c_str());
+        Serial.println("Đã thêm header Authorization!");
+      }
+      https.addHeader("Content-Type", "application/json");
+      Serial.print("[HTTPS] POST...");
+      // Thực hiện yêu cầu POST
+      int httpCode = https.POST(jsonData);
+
+      // Kiểm tra mã trạng thái của yêu cầu
+      if (httpCode > 0)
+      {
+        // Đọc và deserialize phản hồi từ server
+        String payload = https.getString();
+
+        // In ra mã trạng thái và phản hồi từ server
+        Serial.printf(" code: %d\n", httpCode);
+        Serial.println(":RESPONE:");
+        Serial.println(payload);
+        return payload;
+      }
+      else
+      {
+        // Xử lý lỗi khi yêu cầu POST không thành công
+        Serial.printf("[HTTPS] POST failed, errorCode: %s, detail: %s\n", httpCode, https.errorToString(httpCode).c_str());
+        Serial.println("ESP Restart...");
+        delay(5000);
+        ESP.restart();
+      }
+
+      // Kết thúc yêu cầu HTTP
+      https.end();
+    }
+  }
+  delete clients;
+  return "None";
+}
+
+
+void whileTrueCallAPIAttendance(const char* lst[10][2]){
+      dataResponse = postDataHTTPS(lst, 4, "/api/v1/schools/attendance", "Post Data");
+
+      StaticJsonDocument<1024> doc;
+      DeserializationError e = deserializeJson(doc, dataResponse);
+      const char *mes = doc["message"];
+      Serial.print("code: ");
+      Serial.println(mes);
+      if ((String(mes) == "Unauthorized") || (String(mes) == "Token Invalid") || (String(mes) == "Token Expired"))
+      {
+        doc.clear();
+        dataResponse = postDataHTTPS(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
+        e = deserializeJson(doc, dataResponse);
+        const char* tokenn_new = doc["data"]["token"];
+        tokenn = String(tokenn_new);
+        Serial.print("Token: ");
+        Serial.println(tokenn);
+
+        return whileTrueCallAPIAttendance(lst);
+      }
+}
+
 // setup PN532
 void setup_PN532()
 {
@@ -179,24 +314,31 @@ String ReadBlock(uint8_t *keyAuthen, uint8_t block)
   Serial.print(uidLength, DEC);
   Serial.println(" bytes");
   Serial.print("  UID Value: ");
-
   if (uidLength == 4)
   {
-    for(int i = 0; i < uidLength; i++){
+    for (int i = 0; i < uidLength; i++)
+    {
       Serial.print(CardUID[i], HEX);
       Serial.print(":");
     }
     Serial.println();
+
     // Xử lý biến CardUID thành chuỗi:
     s_CardUID = "";
+    String t;
     for (int i = 0; i < uidLength; i++)
     {
-      s_CardUID += String(CardUID[i], HEX);
-      s_CardUID += ' ';
+      if (String(CardUID[i], HEX).length() == 1)
+      {
+        s_CardUID += "0" + String(CardUID[i], HEX);
+      }
+      else
+        s_CardUID += String(CardUID[i], HEX);
     }
+    s_CardUID.toUpperCase();
     Serial.print("Chuoi_UID: ");
     Serial.println(s_CardUID);
-    Serial.println("");
+
     // Xác thực Key A
     Serial.println("Seems to be a Mifare Classic card (4 byte UID)");
     Serial.println("Trying to authenticate block 4 with default keyAuthen value");
@@ -227,26 +369,33 @@ String ReadBlock(uint8_t *keyAuthen, uint8_t block)
 
   if (uidLength == 7)
   {
-    for(int i = 0; i < uidLength; i++){
+    for (int i = 0; i < uidLength; i++)
+    {
       Serial.print(CardUID[i], HEX);
       Serial.print(":");
     }
     Serial.println();
+
     // Xử lý biến CardUID thành chuỗi:
     s_CardUID = "";
+    String t;
     for (int i = 0; i < uidLength; i++)
     {
-      s_CardUID += String(CardUID[i], HEX);
-      s_CardUID += ' ';
+      if (String(CardUID[i], HEX).length() == 1)
+      {
+        s_CardUID += "0" + String(CardUID[i], HEX);
+      }
+      else
+        s_CardUID += String(CardUID[i], HEX);
     }
+    s_CardUID.toUpperCase();
     Serial.print("Chuoi_UID: ");
     Serial.println(s_CardUID);
-    Serial.println("");
-    for (int i = 0; i < 4; i++){
+
+    for (int i = 0; i < 4; i++)
+    {
       CardUID4Byte[i] = CardUID[3 + i];
-      // Serial.print(CardUID4Byte[i]);
-      // Serial.print(":");
-    }  
+    }
     // Serial.println();
     // Xác thực Key A
     Serial.println("Seems to be a Mifare card (7 byte UID)");
@@ -262,14 +411,16 @@ String ReadBlock(uint8_t *keyAuthen, uint8_t block)
       if (success)
       {
         Serial.print("Reading Block...");
-        for (int i = 0; i < 16; i++){
-          if (data[i] != 255){
+        for (int i = 0; i < 16; i++)
+        {
+          if (data[i] != 255)
+          {
             s_data += (char)data[i];
           }
           else
             break;
         }
-          
+
         Serial.println("Done.");
         valid = true;
         return s_data;
@@ -331,6 +482,8 @@ String overName(String name)
 // Xử lấy lấy thông tin thời gian từ API:
 String GetTimeFromAPI()
 {
+  HTTPClient http;
+  WiFiClient client;
   int checkAPI = http.begin(API_Time);
   if (checkAPI)
   {
@@ -358,7 +511,13 @@ String GetTimeFromAPI()
       return time;
     }
     else
-      Serial.printf("date time-[HTTP] GET... failed, error: %s\n", http.errorToString(cod).c_str());
+    {
+      Serial.printf("[HTTPS] POST failed, errorCode: %s, detail: %s\n", cod, http.errorToString(cod).c_str());
+      Serial.println("ESP Restart...");
+      delay(5000);
+      ESP.restart();
+    }
+
     http.end();
   }
   return GetTimeFromAPI();
@@ -421,7 +580,7 @@ void setup()
   URL_server = readFile(SPIFFS, URL_serverPath);
   AP_name = readFile(SPIFFS, AP_namePath);
   AP_pass = readFile(SPIFFS, AP_passPath);
-  jsonFile = readFile(SPIFFS, Students_list_path);
+  // jsonFile = readFile(SPIFFS, Students_list_path);
 
   Serial.println(ssid);
   Serial.println(pass);
@@ -502,34 +661,6 @@ void setup()
           // Write file to save value
           writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
         }
-        // HTTP POST Studen List value
-        // if (p->name() == PARAM_INPUT_7) {
-        //     File file = SPIFFS.open("/students_list.json", "w");
-        //     // Đọc dữ liệu từ tệp tải lên và lưu vào tệp /data.json
-        //     size_t fileSize = p->size(); // Kích thước tệp
-        //     uint8_t buffer[fileSize];
-        //     p->value().getBytes(buffer, fileSize);
-        //     file.write(buffer, fileSize);
-        //     file.close();
-        //     // Lưu dữ liệu vào tệp /data.json trong bộ nhớ
-
-        //     if (!file) {
-        //       Serial.println("Failed to open file for writing");
-        //     } else {
-        //       // Đặt nội dung vào một cấu trúc JSON
-        //       DynamicJsonDocument doc(1024*20); // Thay đổi kích thước dựa trên kích thước của dữ liệu JSON
-        //       DeserializationError error = deserializeJson(doc, buffer);
-              
-        //       if (error) {
-        //         Serial.println("Failed to parse JSON");
-        //       } else {
-        //         // Ghi dữ liệu JSON vào tệp
-        //         serializeJson(doc, file);
-        //         file.close();
-        //         Serial.println("JSON data saved successfully");
-        //     }
-        //   }
-        // }
       }
     }
     restart = true;
@@ -543,6 +674,18 @@ void setup()
     // setup RealTime
     delay(1000);
     SetBeginTime();
+
+    dataResponse = postDataHTTPS(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
+    StaticJsonDocument<1024> docMain;
+    DeserializationError e = deserializeJson(docMain, dataResponse);
+    if (!e){
+      const char* temp = docMain["data"]["token"];
+      tokenn = String(temp);
+      Serial.print("Token: ");
+      Serial.println(tokenn);    
+    }
+
+
     lcd.clear();
     lcd.setCursor(1, 1);
     lcd.print("THIET BI DIEM DANH");
@@ -566,9 +709,11 @@ void loop()
   if (checkCard)
   {
     Serial.println(F("**Card Detected:**"));
-    SSCID = ReadBlock(key, 2);
+    SSCID = ReadBlock(key, 1);
     Serial.println(F("\n**End Reading**\n"));
     Serial.println("Data: " + SSCID);
+
+    SSCID = "0" + SSCID;
 
     if (!valid)
     {
@@ -577,11 +722,28 @@ void loop()
     }
     else
     {
+      // Dợi
       lcd.clear();
-      // In tên lên lcd:
+      lcd.setCursor(0, 1);
+      lcd.print("Taking attendance...");
+      KenKeu();
+
+      // Post len server
+      const char *dataAPI[10][2] = {
+          {"deviceId", TerminalID.c_str()},
+          {"cardUid", s_CardUID.c_str()},
+          {"uid", SSCID.c_str()},
+          {"serviceCode", "attendance"}};
+      // Post dữ liệu
+      // postDataHTTPS(ts, 4, "/api/v1/schools/attendance", "Post Data");
+      whileTrueCallAPIAttendance(dataAPI);
+
+      // In lên lcd:
+      lcd.clear();
+      // In tên
       lcd.setCursor(0, 0);
       lcd.print("Name: ");
-      Name_st = readFileJson(SPIFFS, "/students_list.json", SSCID);
+      // Name_st = readFileJson(SPIFFS, "/students_list.json", SSCID);
       if (Name_st.length() > 14)
       {
         Name_display = overName(Name_st);
@@ -601,52 +763,8 @@ void loop()
       lcd.setCursor(0, 3);
       lcd.print("Device: ");
       lcd.print(TerminalID);
-
-      KenKeu();
-
-      // POST lên server
-      StaticJsonDocument<200> doc; // khai báo chỗ chứa dữ liệu
-      String jsonData;
-      doc["TerminalID"] = TerminalID;
-      doc["CardUID"] = s_CardUID;
-      doc["SSCID"] = SSCID;
-      doc["Name"] = Name_st;
-      serializeJsonPretty(doc, jsonData);
-      Serial.print("[HTTP] begin...\n");
-      // configure traged server and url
-      http.begin(client, URL_server + "/api/nfc-tab/test"); // HTTP
-      // http.begin(*clients, URL_server + "/api/nfc-tab/test"); // HTTPS
-      http.addHeader("Content-Type", "application/json");
-
-      Serial.print("[HTTP] POST...\n");
-      // start connection and send HTTP header and body
-      int httpCode = http.POST(jsonData);
-
-      // httpCode will be negative on error
-      if (httpCode > 0)
-      {
-        // HTTP header has been send and Server response header has been handled
-        Serial.printf("[HTTP] POST... code: %d\n", httpCode);
-
-        // file found at server
-        if (httpCode == HTTP_CODE_OK)
-        {
-          const String &payload = http.getString();
-          Serial.println("received payload:\n");
-          Serial.println(payload);
-          pcf.digitalWrite(LED_4, HIGH);
-          delay(700);
-          pcf.digitalWrite(LED_4, LOW);
-        }
-        else
-        {
-          pcf.digitalWrite(LED_5, HIGH);
-          delay(700);
-          pcf.digitalWrite(LED_5, LOW);
-          Serial.printf("[HTTP] POST... failed, error: %s\n", http.errorToString(httpCode).c_str());
-        }
-      }
-      http.end();
     }
+    Serial.println("--------------------------------------------------------------------------------END--------------------------------------------------------------------------------");
   }
 }
+
