@@ -56,7 +56,6 @@ String AP_name, AP_pass;
 String jsonFile;
 // Các biến kiểm tra
 boolean restart = false, valid = true;
-String checkSSCID = "";
 // Các đường dẫn chứa giá trị
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
@@ -66,21 +65,17 @@ const char *AP_namePath = "/AP_name.txt";
 const char *AP_passPath = "/AP_pass.txt";
 const char *Students_list_path = "/students_list.json";
 
-int curTime;
+int curTime; // đếm thời gian hiệu lực token
 const char *tokenn = "";
+String dataResponse = "";
 
-String dataLoginAPI[10][2] = {
+const char *dataLoginAPI[10][2] = {
     {"partnerCode", "FV_ATTENDANT_DEVICE"},
     {"accessCode", "nz3EFcBdhsGm3x0nNYEa7O7XNTaS7s"}};
-
 // http://192.168.4.1/ : AP IP Address
 
 AsyncWebServer server(80);
 IPAddress localIP;
-
-// POST lên server
-StaticJsonDocument<1024> doc; // khai báo chỗ chứa dữ liệu
-String jsonData;
 
 const char *rootCACertificate =
     "-----BEGIN CERTIFICATE-----\n"
@@ -578,72 +573,14 @@ void setup()
     delay(1000);
     SetBeginTime();
 
-    postData(dataLoginAPI, "/api/v1/partners/login", "Login API");
-    // Serial.println("----------------------------Login API--------------------------");
-    // doc.clear();
-    // jsonData = "";
-    // doc["partnerCode"] = "FV_ATTENDANT_DEVICE";
-    // doc["accessCode"] = "nz3EFcBdhsGm3x0nNYEa7O7XNTaS7s";
+    dataResponse = postData(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
+    StaticJsonDocument<1024> docMain;
+    DeserializationError e = deserializeJson(docMain, dataResponse);
+    tokenn = docMain["data"]["token"];
+    tokenn = ("Bearer " + String(tokenn)).c_str();
+    Serial.print("Token: ");
+    Serial.println(tokenn);
 
-    // serializeJsonPretty(doc, jsonData);
-    // Serial.println(jsonData);
-
-    // if (clients)
-    // {
-    //   // set secure client with certificate
-    //   clients->setCACert(rootCACertificate);
-    //   // create an HTTPClient instance
-
-    //   // Initializing an HTTPS communication using the secure client
-    //   Serial.print("[HTTPS] begin...\n");
-    //   if (https.begin(*clients, URL_server + "/api/v1/partners/login"))
-    //   { // HTTPS
-    //     Serial.print("[HTTPS] POST...");
-    //     // start connection and send HTTP header
-    //     https.addHeader("Content-Type", "application/json");
-    //     int httpCode = https.POST(jsonData);
-    //     // httpCode will be negative on error
-    //     if (httpCode > 0)
-    //     {
-    //       doc.clear();
-    //       String payload = https.getString();
-    //       // HTTP header has been send and Server response header has been handled
-    //       Serial.printf("[ code: %d\n", httpCode);
-    //       Serial.println(":RESPONE:");
-    //       DeserializationError e = deserializeJson(doc, payload);
-    //       if (!e)
-    //       {
-    //         serializeJsonPretty(doc, Serial);
-    //         Serial.println();
-    //       }
-
-    //       // file found at server
-    //       if (httpCode == HTTP_CODE_OK || httpCode == HTTP_CODE_MOVED_PERMANENTLY)
-    //       {
-    //         // print server response payload
-    //         tokenn = doc["data"]["token"];
-    //         tokenn = ("Bearer " + String(tokenn)).c_str();
-    //         Serial.print("Token: ");
-    //         Serial.println(tokenn);
-    //       }
-    //     }
-    //     else
-    //     {
-    //       Serial.printf("[HTTPS] POST failed, errorCode: %s, detail: %s\n", httpCode, https.errorToString(httpCode).c_str());
-    //       Serial.println("ESP Restart...");
-    //       delay(5000);
-    //       ESP.restart();
-    //     }
-    //     https.end();
-    //     curTime = rtc.getMinute();
-    //     Serial.print("Bắt đầu đếm tại phút: ");
-    //     Serial.println(curTime);
-    //   }
-    // }
-    // else
-    // {
-    //   Serial.println("[HTTPS] Unable to connect");
-    // }
     lcd.clear();
     lcd.setCursor(1, 1);
     lcd.print("THIET BI DIEM DANH");
@@ -705,17 +642,24 @@ void loop()
 
       KenKeu();
       // Post len server
-      String ts[10][2] = {
-          {"deviceId", TerminalID},
-          {"cardUid", s_CardUID},
-          {"uid", "0" + SSCID},
+      const char *ts[10][2] = {
+          {"deviceId", TerminalID.c_str()},
+          {"cardUid", s_CardUID.c_str()},
+          {"uid", ("0" + SSCID).c_str()},
           {"serviceCode", "attendance"}};
       int timeLimit = rtc.getMinute() - curTime;
       Serial.print("Thời hạn: ");
       Serial.println(timeLimit);
       if (((timeLimit) >= 58) || ((timeLimit) < 0))
       {
-        postData(dataLoginAPI, "/api/v1/partners/login", "Login API");
+        dataResponse = postData(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
+        Serial.println(dataResponse);
+        StaticJsonDocument<1024> docMain;
+        DeserializationError e = deserializeJson(docMain, dataResponse);
+        tokenn = docMain["data"]["token"];
+        tokenn = ("Bearer " + String(tokenn)).c_str();
+        Serial.print("Token: ");
+        Serial.println(tokenn);
         // Serial.println("----------------------------Login API--------------------------");
         // doc.clear();
         // jsonData = "";
@@ -782,7 +726,7 @@ void loop()
         // }
 
         // Post dữ lieu
-        postData(ts, "/api/v1/schools/attendance", "Post dữ liệu");
+        postData(ts, 4, "/api/v1/schools/attendance", "Post Data");
         // Serial.println("-----------Post dữ liệu-------------------");
         // doc.clear();
         // jsonData = "";
@@ -858,12 +802,7 @@ void loop()
       else
       {
         // Post dữ lieu
-        String ts[10][2] = {
-            {"deviceId", TerminalID},
-            {"cardUid", s_CardUID},
-            {"uid", "0" + SSCID},
-            {"serviceCode", "attendance"}};
-        postData(ts, "/api/v1/schools/attendance", "Post dữ liệu");
+        postData(ts, 4, "/api/v1/schools/attendance", "Post Data");
         // Serial.println("-----------Post dữ liệu-------------------");
         // doc.clear();
         // jsonData = "";
@@ -936,11 +875,12 @@ void loop()
     Serial.println("--------------------------------------------------------------------------------END--------------------------------------------------------------------------------");
   }
 }
-void postData(String lstData[10][2], String endpoint, String desc)
+String postData(const char *lstData[10][2], int soLuong, String endpoint, String desc)
 {
   Serial.printf("-----------%s-------------------\n", desc);
   WiFiClientSecure *clients = new WiFiClientSecure;
   HTTPClient https;
+
   if (clients)
   {
     // doc.clear();
@@ -949,23 +889,20 @@ void postData(String lstData[10][2], String endpoint, String desc)
 
     // Tạo một đối tượng JSON để lưu trữ dữ liệu
     StaticJsonDocument<1024> doc; // khai báo chỗ chứa dữ liệu
-    String jsonData;
-
-    int soLuong = sizeof(lstData) / sizeof(lstData[0]);
-    Serial.printf("Số lượng đối tượng cần gửi: %s", soLuong);
-    for (int i = 0; i < soLuong; i++)
-    {
-      doc[lstData[i][0]] = lstData[i][1];
-    }
+    String jsonData = "";
+    doc["partnerCode"] = "FV_ATTENDANT_DEVICE";
+    doc["accessCode"] = "nz3EFcBdhsGm3x0nNYEa7O7XNTaS7s";
+    // for (int i = 0; i < soLuong; i++)
+    // {
+    //   doc[lstData[i][0]] = lstData[i][1];
+    // }
 
     // Serialize JSON data
-    serializeJson(doc, jsonData);
+    serializeJsonPretty(doc, jsonData);
 
     // In ra JSON data trên Serial Monitor
     serializeJsonPretty(doc, Serial);
     Serial.println();
-    Serial.print("token: ");
-    Serial.println(tokenn);
 
     // Khởi tạo kết nối HTTPS
     Serial.print("[HTTPS] begin...\n");
@@ -973,8 +910,12 @@ void postData(String lstData[10][2], String endpoint, String desc)
     {
       Serial.print("[HTTPS] POST...");
 
-      // Thêm header Authorization vào yêu cầu HTTP
-      https.addHeader("Authorization", tokenn);
+      if (desc == "Post Data")
+      {
+        // Thêm header Authorization vào yêu cầu HTTP
+        https.addHeader("Authorization", tokenn);
+        Serial.println("Đã thêm header!");
+      }
 
       // Thực hiện yêu cầu POST
       int httpCode = https.POST(jsonData);
@@ -984,30 +925,12 @@ void postData(String lstData[10][2], String endpoint, String desc)
       {
         // Đọc và deserialize phản hồi từ server
         String payload = https.getString();
-        StaticJsonDocument<200> responseDoc;
-        DeserializationError e = deserializeJson(responseDoc, payload);
 
         // In ra mã trạng thái và phản hồi từ server
         Serial.printf(" code: %d\n", httpCode);
-
-        // Kiểm tra lỗi trong quá trình deserialize
-        if (!e)
-        {
-          Serial.println(":RESPONE:");
-          serializeJsonPretty(responseDoc, Serial);
-          Serial.println();
-          String codeAPI = responseDoc["code"];
-          String suc = responseDoc["success"];
-          if (suc == "false")
-          {
-            Serial.print("Lỗi gửi dữ liệu: ");
-            Serial.println(codeAPI);
-            if (codeAPI == "TOKEN_EXPIRED" || codeAPI == "TOKEN_INVALID")
-            {
-              // Xử lý lỗi token
-            }
-          }
-        }
+        Serial.println(":RESPONE:");
+        Serial.println(payload);
+        return payload;
       }
       else
       {
@@ -1022,4 +945,6 @@ void postData(String lstData[10][2], String endpoint, String desc)
       https.end();
     }
   }
+  delete clients;
+  return "None";
 }
