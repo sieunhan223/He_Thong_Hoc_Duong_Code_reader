@@ -649,7 +649,16 @@ void setup()
           Serial.print("\nSSID set to: ");
           Serial.println(ssid);
           // Write file to save value
-          writeFile(SPIFFS, ssidPath, ssid.c_str());
+
+          if (!writeFile(SPIFFS, ssidPath, ssid.c_str())){
+            lcd.clear();
+            lcd.setCursor(0,1);
+            lcd.print("Cannot be configured");
+            lcd.setCursor(4,2);
+            lcd.print("Resetting...");
+            delay(5000);
+            ESP.restart();
+          };
         }
         // HTTP POST pass value
         if (p->name() == PARAM_INPUT_2) {
@@ -657,7 +666,16 @@ void setup()
           Serial.print("\nPassword set to: ");
           Serial.println(pass);
           // Write file to save value
-          writeFile(SPIFFS, passPath, pass.c_str());
+          
+          if (!writeFile(SPIFFS, passPath, pass.c_str())){
+            lcd.clear();
+            lcd.setCursor(0,1);
+            lcd.print("Cannot be configured");
+            lcd.setCursor(4,2);
+            lcd.print("Resetting...");
+            delay(5000);
+            ESP.restart();
+          };
         }
         // HTTP POST terminal_id value
         if (p->name() == PARAM_INPUT_3) {
@@ -665,7 +683,16 @@ void setup()
           Serial.print("\nTerminal ID set to: ");
           Serial.println(terminal_id);
           // Write file to save value
-          writeFile(SPIFFS, terminal_idPath, terminal_id.c_str());
+          
+          if (!writeFile(SPIFFS, terminal_idPath, terminal_id.c_str())){
+            lcd.clear();
+            lcd.setCursor(0,1);
+            lcd.print("Cannot be configured");
+            lcd.setCursor(4,2);
+            lcd.print("Resetting...");
+            delay(5000);
+            ESP.restart();
+          };
         }
         // HTTP POST server value
         if (p->name() == PARAM_INPUT_4) {
@@ -673,7 +700,16 @@ void setup()
           Serial.print("\nServer address set to: ");
           Serial.println(URL_server);
           // Write file to save value
-          writeFile(SPIFFS, URL_serverPath, URL_server.c_str());
+          
+          if (!writeFile(SPIFFS, URL_serverPath, URL_server.c_str())){
+            lcd.clear();
+            lcd.setCursor(0,1);
+            lcd.print("Cannot be configured");
+            lcd.setCursor(4,2);
+            lcd.print("Resetting...");
+            delay(5000);
+            ESP.restart();
+          };
         }
         // HTTP POST AP name value
         if (p->name() == PARAM_INPUT_5) {
@@ -681,7 +717,16 @@ void setup()
           Serial.print("\nAP name set to: ");
           Serial.println(AP_name);
           // Write file to save value
-          writeFile(SPIFFS, AP_namePath, AP_name.c_str());
+          
+          if (!writeFile(SPIFFS, AP_namePath, AP_name.c_str())){
+            lcd.clear();
+            lcd.setCursor(0,1);
+            lcd.print("Cannot be configured");
+            lcd.setCursor(4,2);
+            lcd.print("Resetting...");
+            delay(5000);
+            ESP.restart();
+          };
         }
         // HTTP POST AP pass value
         if (p->name() == PARAM_INPUT_6) {
@@ -689,7 +734,16 @@ void setup()
           Serial.print("\nAP pass set to: ");
           Serial.println(AP_pass);
           // Write file to save value
-          writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
+          
+          if (!writeFile(SPIFFS, AP_passPath, AP_pass.c_str())){
+            lcd.clear();
+            lcd.setCursor(0,1);
+            lcd.print("Cannot be configured");
+            lcd.setCursor(4,2);
+            lcd.print("Resetting...");
+            delay(5000);
+            ESP.restart();
+          };
         }
       }
     }
