@@ -60,7 +60,7 @@ String URL_server;
 String AP_name, AP_pass;
 String jsonFile;
 // Các biến kiểm tra
-boolean restart = false, valid = true;
+bool valid = true;
 // Các đường dẫn chứa giá trị
 const char *ssidPath = "/ssid.txt";
 const char *passPath = "/pass.txt";
@@ -140,22 +140,26 @@ String readFile(fs::FS &fs, const char *path)
 }
 
 // Hàm viết file
-void writeFile(fs::FS &fs, const char *path, const char *message)
+bool writeFile(fs::FS &fs, const char *path, const char *message)
 {
   Serial.printf("Writing file: %s\r\n", path);
   File file = fs.open(path, "w");
   if (!file)
   {
     Serial.println("- failed to open file for writing");
-    return;
+    return 0;
   }
   if (file.print(message))
+  {
     Serial.println("- file written");
+    return 1;
+  }
 
   else
-
+  {
     Serial.println("- frite failed");
-
+    return 0;
+  }
   file.close();
 }
 
@@ -182,6 +186,7 @@ bool initWiFi()
     }
     delay(500);
   }
+  Serial.println();
   return true;
 }
 
@@ -278,7 +283,7 @@ bool whileTrueCallAPIAttendance(const char *lst[10][2])
     Serial.print("message: ");
     Serial.println(mes);
 
-    if ((String(mes) == "Unauthorized") || (String(mes) == "Token Invalid") || (String(mes) == "Token Expired"))
+    if ((String(mes) == "Unauthorized") || (String(mes) == "Token Invalid") || (String(cod) == "TOKEN_EXPIRED") || (String(cod) == "TOKEN_INVALID") || (String(mes) == "Token expired"))
     {
       doc.clear();
       dataResponse = postDataHTTPS(dataLoginAPI, 2, "/api/v1/partners/login", "Login API");
@@ -287,7 +292,6 @@ bool whileTrueCallAPIAttendance(const char *lst[10][2])
       tokenn = String(tokenn_new);
       Serial.print("Token: ");
       Serial.println(tokenn);
-
       return whileTrueCallAPIAttendance(lst);
     }
     if (String(cod) == "USER_INVALID")
@@ -296,7 +300,6 @@ bool whileTrueCallAPIAttendance(const char *lst[10][2])
       lcd.clear();
       lcd.setCursor(3, 1);
       lcd.print("User Invalid!!");
-      return false;
     }
     else if (String(cod) == "USER_NOT_FOUND")
     {
@@ -304,8 +307,8 @@ bool whileTrueCallAPIAttendance(const char *lst[10][2])
       lcd.clear();
       lcd.setCursor(0, 1);
       lcd.print("User not found!");
-      return false;
     }
+    return false;
   }
   return true;
 }
@@ -583,8 +586,8 @@ void KenKeu()
 void setup()
 {
   Serial.begin(115200);
-  nfc.begin();
-  setup_PN532();
+  // nfc.begin();
+  // setup_PN532();
   initSPIFFS();
 
   // Init PCF
@@ -643,7 +646,7 @@ void setup()
         // HTTP POST ssid value
         if (p->name() == PARAM_INPUT_1) {
           ssid = p->value().c_str();
-          Serial.print("SSID set to: ");
+          Serial.print("\nSSID set to: ");
           Serial.println(ssid);
           // Write file to save value
           writeFile(SPIFFS, ssidPath, ssid.c_str());
@@ -651,7 +654,7 @@ void setup()
         // HTTP POST pass value
         if (p->name() == PARAM_INPUT_2) {
           pass = p->value().c_str();
-          Serial.print("Password set to: ");
+          Serial.print("\nPassword set to: ");
           Serial.println(pass);
           // Write file to save value
           writeFile(SPIFFS, passPath, pass.c_str());
@@ -659,7 +662,7 @@ void setup()
         // HTTP POST terminal_id value
         if (p->name() == PARAM_INPUT_3) {
           terminal_id = p->value().c_str();
-          Serial.print("Terminal ID set to: ");
+          Serial.print("\nTerminal ID set to: ");
           Serial.println(terminal_id);
           // Write file to save value
           writeFile(SPIFFS, terminal_idPath, terminal_id.c_str());
@@ -667,7 +670,7 @@ void setup()
         // HTTP POST server value
         if (p->name() == PARAM_INPUT_4) {
           URL_server = p->value().c_str();
-          Serial.print("server address set to: ");
+          Serial.print("\nServer address set to: ");
           Serial.println(URL_server);
           // Write file to save value
           writeFile(SPIFFS, URL_serverPath, URL_server.c_str());
@@ -675,7 +678,7 @@ void setup()
         // HTTP POST AP name value
         if (p->name() == PARAM_INPUT_5) {
           AP_name = p->value().c_str();
-          Serial.print("AP name set to: ");
+          Serial.print("\nAP name set to: ");
           Serial.println(AP_name);
           // Write file to save value
           writeFile(SPIFFS, AP_namePath, AP_name.c_str());
@@ -683,15 +686,17 @@ void setup()
         // HTTP POST AP pass value
         if (p->name() == PARAM_INPUT_6) {
           AP_pass = p->value().c_str();
-          Serial.print("AP pass set to: ");
+          Serial.print("\nAP pass set to: ");
           Serial.println(AP_pass);
           // Write file to save value
           writeFile(SPIFFS, AP_passPath, AP_pass.c_str());
         }
       }
     }
-    restart = true;
-    request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: http://192.168.4.1/"); });
+    request->send(200, "text/plain", "Done. ESP will restart, connect to your router and go to IP address: http://192.168.4.1/"); 
+    delay(5000);
+    ESP.restart();
+    });
 
   server.begin();
 
@@ -726,11 +731,6 @@ void setup()
 //*****************************************************************************************//
 void loop()
 {
-  if (restart)
-  {
-    delay(5000);
-    ESP.restart();
-  }
   // kiểm tra thẻ mới
   checkCard = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, CardUID, &uidLength);
   if (checkCard)
@@ -763,7 +763,9 @@ void loop()
           {"serviceCode", "attendance"}};
       // Post dữ liệu
       // postDataHTTPS(ts, 4, "/api/v1/schools/attendance", "Post Data");
-      if (!whileTrueCallAPIAttendance(dataAPI)){
+      if (!whileTrueCallAPIAttendance(dataAPI))
+      {
+        Serial.println("--------------------------------------------------------------------------------END--------------------------------------------------------------------------------");
         return;
       };
 
